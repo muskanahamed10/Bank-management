@@ -1,0 +1,196 @@
+from flask import Flask, request, redirect, session, render_template_string
+import sqlite3
+
+app = Flask(__name__)
+app.secret_key = "banksecret"
+
+# ---------- DATABASE ----------
+def get_db():
+    return sqlite3.connect("bank.db")
+
+def create_db():
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        balance INTEGER
+    )
+    """)
+    db.commit()
+    db.close()
+
+create_db()
+
+# ---------- HTML TEMPLATES ----------
+login_html = """
+<!DOCTYPE html>
+<html>
+<head><title>Login</title></head>
+<body>
+<h2>Bank Login</h2>
+<form method="post">
+<input name="username" placeholder="Username" required><br><br>
+<input type="password" name="password" placeholder="Password" required><br><br>
+<button>Login</button>
+</form>
+<a href="/register">Register</a>
+</body>
+</html>
+"""
+
+register_html = """
+<!DOCTYPE html>
+<html>
+<head><title>Register</title></head>
+<body>
+<h2>Register</h2>
+<form method="post">
+<input name="username" placeholder="Username" required><br><br>
+<input type="password" name="password" placeholder="Password" required><br><br>
+<button>Register</button>
+</form>
+<a href="/">Back to Login</a>
+</body>
+</html>
+"""
+
+dashboard_html = """
+<!DOCTYPE html>
+<html>
+<head><title>Dashboard</title></head>
+<body>
+<h2>Welcome {{user}}</h2>
+<p>Balance: ₹{{balance}}</p>
+<a href="/deposit">Deposit</a> |
+<a href="/withdraw">Withdraw</a> |
+<a href="/logout">Logout</a>
+</body>
+</html>
+"""
+
+deposit_html = """
+<!DOCTYPE html>
+<html>
+<head><title>Deposit</title></head>
+<body>
+<h2>Deposit</h2>
+<form method="post">
+<input type="number" name="amount" required>
+<button>Deposit</button>
+</form>
+</body>
+</html>
+"""
+
+withdraw_html = """
+<!DOCTYPE html>
+<html>
+<head><title>Withdraw</title></head>
+<body>
+<h2>Withdraw</h2>
+<form method="post">
+<input type="number" name="amount" required>
+<button>Withdraw</button>
+</form>
+</body>
+</html>
+"""
+
+# ---------- ROUTES ----------
+@app.route("/", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        u = request.form["username"]
+        p = request.form["password"]
+
+        db = get_db()
+        cur = db.cursor()
+        cur.execute("SELECT * FROM users WHERE username=? AND password=?", (u, p))
+        user = cur.fetchone()
+
+        if user:
+            session["user"] = u
+            return redirect("/dashboard")
+        return "Invalid login"
+
+    return render_template_string(login_html)
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        u = request.form["username"]
+        p = request.form["password"]
+
+        db = get_db()
+        cur = db.cursor()
+        cur.execute("INSERT INTO users VALUES (NULL, ?, ?, 0)", (u, p))
+        db.commit()
+        db.close()
+        return redirect("/")
+
+    return render_template_string(register_html)
+
+
+@app.route("/dashboard")
+def dashboard():
+    if "user" not in session:
+        return redirect("/")
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("SELECT balance FROM users WHERE username=?", (session["user"],))
+    balance = cur.fetchone()[0]
+
+    return render_template_string(
+        dashboard_html, user=session["user"], balance=balance
+    )
+
+
+@app.route("/deposit", methods=["GET", "POST"])
+def deposit():
+    if request.method == "POST":
+        amt = int(request.form["amount"])
+        db = get_db()
+        cur = db.cursor()
+        cur.execute("UPDATE users SET balance=balance+? WHERE username=?",
+                    (amt, session["user"]))
+        db.commit()
+        db.close()
+        return redirect("/dashboard")
+
+    return render_template_string(deposit_html)
+
+
+@app.route("/withdraw", methods=["GET", "POST"])
+def withdraw():
+    if request.method == "POST":
+        amt = int(request.form["amount"])
+        db = get_db()
+        cur = db.cursor()
+        cur.execute("SELECT balance FROM users WHERE username=?", (session["user"],))
+        bal = cur.fetchone()[0]
+
+        if amt > bal:
+            return "Insufficient balance"
+
+        cur.execute("UPDATE users SET balance=balance-? WHERE username=?",
+                    (amt, session["user"]))
+        db.commit()
+        db.close()
+        return redirect("/dashboard")
+
+    return render_template_string(withdraw_html)
+
+
+@app.route("/logout")
+def logout():
+    session.pop("user", None)
+    return redirect("/")
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
